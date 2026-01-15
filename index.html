@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Paws & Preferences Pro</title>
+    <!-- Confetti Library -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.browser.min.js"></script>
+    <style>
+        :root {
+            --primary: #ff4d6d;
+            --secondary: #4dffb4;
+            --bg: #f0f2f5;
+            --card-white: #ffffff;
+        }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+        }
+
+        header {
+            width: 100%;
+            padding: 15px 0;
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            text-align: center;
+            z-index: 100;
+        }
+
+        .filter-container { margin-top: 10px; }
+        select { padding: 8px 12px; border-radius: 20px; border: 1px solid #ddd; outline: none; }
+
+        #app-container {
+            position: relative;
+            width: 90vw;
+            max-width: 380px;
+            height: 60vh;
+            margin-top: 20px;
+        }
+
+        .card {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: var(--card-white);
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+            cursor: grab;
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s;
+            touch-action: none;
+        }
+
+        .card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            pointer-events: none;
+            background: #eee; /* Placeholder color while loading */
+        }
+
+        .profile-info {
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            padding: 40px 20px 20px;
+            background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+            color: white;
+            pointer-events: none;
+        }
+        .profile-info h3 { margin: 0; font-size: 1.6rem; }
+
+        .controls { display: flex; gap: 20px; margin-top: 20px; z-index: 10; }
+        .btn-round {
+            width: 55px; height: 55px; border-radius: 50%; border: none;
+            background: white; box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            font-size: 1.2rem;
+        }
+        .btn-undo { color: #ff9f43; font-weight: bold; }
+        .btn-dislike { color: var(--primary); font-size: 1.5rem; }
+        .btn-like { color: var(--secondary); font-size: 1.5rem; }
+
+        .badge {
+            position: absolute; top: 30px; padding: 5px 15px; border: 4px solid;
+            border-radius: 10px; font-size: 2rem; font-weight: 900; opacity: 0;
+        }
+        .badge-like { right: 20px; color: var(--secondary); border-color: var(--secondary); transform: rotate(15deg); }
+        .badge-dislike { left: 20px; color: var(--primary); border-color: var(--primary); transform: rotate(-15deg); }
+
+        #summary {
+            display: none; text-align: center; padding: 20px;
+            overflow-y: auto; width: 100%; height: 100%; background: white;
+        }
+        .liked-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 20px; }
+        .liked-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 12px; }
+
+        #loader { margin-top: 50px; font-weight: bold; color: var(--primary); text-align: center; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h2 style="margin:0; color:var(--primary)">🐾 Paws & Preferences</h2>
+    <div class="filter-container">
+        <label>Filter by Mood: </label>
+        <select id="cat-filter" onchange="loadCats()">
+            <option value="">Random</option>
+            <option value="cute">Cute</option>
+            <option value="orange">Orange</option>
+            <option value="grumpy">Grumpy</option>
+            <option value="black">Black</option>
+        </select>
+    </div>
+</header>
+
+<div id="loader">Fetching Kitties...</div>
+
+<div id="app-container">
+    <div id="stack"></div>
+</div>
+
+<div class="controls" id="controls">
+    <button class="btn-round btn-undo" onclick="undoSwipe()">↺</button>
+    <button class="btn-round btn-dislike" onclick="forceSwipe('left')">✖</button>
+    <button class="btn-round btn-like" onclick="forceSwipe('right')">❤</button>
+</div>
+
+<div id="summary">
+    <h1>It's a Match! 🎉</h1>
+    <p id="stats"></p>
+    <div class="liked-grid" id="liked-grid"></div>
+    <button onclick="location.reload()" style="padding:10px 30px; border-radius:20px; border:none; background:var(--primary); color:white; font-weight:bold; cursor:pointer;">Play Again</button>
+</div>
+
+<script>
+    const CAT_COUNT = 10;
+    const catNames = ["Mochi", "Sir Fluff", "Luna", "Simba", "Oliver", "Garfield", "Bella", "Nala", "Smudge", "Shadow"];
+    const catBios = ["Loves sunlight.", "Box sleeper.", "Wants treats.", "Bird watcher.", "Hates water.", "Nap king.", "Zoomie master.", "Sweet & sour.", "Hiding expert.", "Grass toucher."];
+
+    let stackData = [];
+    let swipeHistory = [];
+    let likedCats = [];
+    let processedCount = 0;
+
+    const stackElement = document.getElementById('stack');
+    const summaryElement = document.getElementById('summary');
+    const loader = document.getElementById('loader');
+
+    async function loadCats() {
+        // Reset UI
+        loader.style.display = 'block';
+        stackElement.innerHTML = '';
+        stackData = [];
+        swipeHistory = [];
+        likedCats = [];
+        processedCount = 0;
+
+        const tag = document.getElementById('cat-filter').value;
+        
+        for (let i = 0; i < CAT_COUNT; i++) {
+            // FIX: Improved URL construction
+            // If tag is present: https://cataas.com/cat/cute
+            // If no tag: https://cataas.com/cat
+            const baseUrl = "https://cataas.com/cat";
+            const url = tag ? `${baseUrl}/${tag}?unique=${i}-${Date.now()}` : `${baseUrl}?unique=${i}-${Date.now()}`;
+            
+            const catInfo = {
+                id: i,
+                url: url,
+                name: catNames[i % catNames.length],
+                bio: catBios[i % catBios.length]
+            };
+            stackData.push(catInfo);
+            createCard(catInfo);
+        }
+        
+        // Hide loader after a short delay to allow images to start loading
+        setTimeout(() => { loader.style.display = 'none'; }, 1000);
+    }
+
+    function createCard(data) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.id = `card-${data.id}`;
+        card.style.zIndex = CAT_COUNT - data.id; // Correct layering
+        
+        card.innerHTML = `
+            <img src="${data.url}" onerror="this.src='https://placekitten.com/400/500'">
+            <div class="profile-info">
+                <h3>${data.name}</h3>
+                <p>${data.bio}</p>
+            </div>
+            <div class="badge badge-like">LIKE</div>
+            <div class="badge badge-dislike">NOPE</div>
+        `;
+        stackElement.appendChild(card);
+        initInteractions(card, data);
+    }
+
+    function initInteractions(el, data) {
+        let startX, currentX = 0, isDragging = false;
+
+        const start = (e) => {
+            isDragging = true;
+            startX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+            el.style.transition = 'none';
+        };
+
+        const move = (e) => {
+            if (!isDragging) return;
+            const x = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+            currentX = x - startX;
+            const rotation = currentX / 15;
+            el.style.transform = `translateX(${currentX}px) rotate(${rotation}deg)`;
+            
+            el.querySelector('.badge-like').style.opacity = currentX > 50 ? (currentX-50)/100 : 0;
+            el.querySelector('.badge-dislike').style.opacity = currentX < -50 ? (Math.abs(currentX)-50)/100 : 0;
+        };
+
+        const end = () => {
+            if (!isDragging) return;
+            isDragging = false;
+            el.style.transition = 'transform 0.4s ease';
+            if (currentX > 100) finalizeSwipe(el, 'right', data);
+            else if (currentX < -100) finalizeSwipe(el, 'left', data);
+            else {
+                el.style.transform = 'translateX(0) rotate(0)';
+                el.querySelectorAll('.badge').forEach(b => b.style.opacity = 0);
+            }
+        };
+
+        el.addEventListener('mousedown', start);
+        window.addEventListener('mousemove', move);
+        window.addEventListener('mouseup', end);
+        el.addEventListener('touchstart', start, {passive: true});
+        el.addEventListener('touchmove', move, {passive: true});
+        el.addEventListener('touchend', end);
+    }
+
+    function finalizeSwipe(el, dir, data) {
+        const moveX = dir === 'right' ? 1000 : -1000;
+        el.style.transform = `translateX(${moveX}px) rotate(${dir === 'right' ? 45 : -45}deg)`;
+        el.style.opacity = '0';
+        el.style.pointerEvents = 'none';
+
+        swipeHistory.push({ element: el, direction: dir, data: data });
+        if (dir === 'right') likedCats.push(data.url);
+        
+        processedCount++;
+        if (processedCount === CAT_COUNT) setTimeout(showSummary, 500);
+    }
+
+    function undoSwipe() {
+        if (swipeHistory.length === 0) return;
+        const last = swipeHistory.pop();
+        const el = last.element;
+        el.style.transition = 'transform 0.5s ease, opacity 0.3s';
+        el.style.transform = 'translateX(0) rotate(0)';
+        el.style.opacity = '1';
+        el.style.pointerEvents = 'auto';
+        el.querySelectorAll('.badge').forEach(b => b.style.opacity = 0);
+        if (last.direction === 'right') likedCats.pop();
+        processedCount--;
+    }
+
+    function forceSwipe(dir) {
+        const cards = Array.from(document.querySelectorAll('.card'));
+        // Find the top-most visible card
+        const topCard = cards
+            .filter(c => c.style.opacity !== '0')
+            .sort((a, b) => b.style.zIndex - a.style.zIndex)[0];
+            
+        if (topCard) {
+            const id = parseInt(topCard.id.split('-')[1]);
+            const data = stackData.find(d => d.id === id);
+            finalizeSwipe(topCard, dir, data);
+        }
+    }
+
+    function showSummary() {
+        document.getElementById('controls').style.display = 'none';
+        document.getElementById('app-container').style.display = 'none';
+        summaryElement.style.display = 'block';
+        document.body.style.overflow = 'auto';
+
+        document.getElementById('stats').innerText = `You liked ${likedCats.length} cats!`;
+        const grid = document.getElementById('liked-grid');
+        grid.innerHTML = '';
+        likedCats.forEach(url => {
+            const img = document.createElement('img');
+            img.src = url;
+            grid.appendChild(img);
+        });
+
+        confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+    }
+
+    loadCats();
+</script>
+</body>
+</html>
